@@ -1,0 +1,1269 @@
+Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC)
+Care System
+A Reproducible Data-Analytics Study Using Federal Operational Data (2023–2025)
+Abstract
+This paper presents a reproducible, end-to-end analytical study of daily caseload and flow dynamics in the
+United States Unaccompanied Alien Children (UAC) program — the system operated by the Office of
+Refugee Resettlement (ORR) within the U.S. Department of Health and Human Services (HHS), working
+in sequence with U.S. Customs and Border Protection (CBP). The study analyses 720 daily observations
+spanning 12 January 2023 to 21 December 2025, drawn from the ORR UAC Program public reporting
+extract, and it does so across a single unbroken pipeline of cleaning, validation, feature engineering,
+exploratory analysis, load-pressure classification, forecasting and dashboard delivery.
+The study contributes five things. First, it documents a two-stage flow system in which CBP custody
+operates as a short-horizon holding stock while HHS care operates as a long-horizon custodial population,
+and it quantifies the resulting scale asymmetry: the mean HHS care population (6,061) is 35 times the
+mean CBP custody stock (171), and HHS care alone carries 97.2% of total system load. Second, it identifies
+a monotonic regime shift across the study window: mean total system load falls from 8,847 children in
+2023 to 2,576 in 2025, a 70.9% contraction, with the single highest daily system load (11,762 children)
+occurring on 20 December 2023 and the lowest (2,002) on 24 August 2025. Third, it constructs a
+transparent, distribution-anchored load-pressure indicator — the intersection of the 75th-percentile
+system-load threshold (8,249.5 children) with positive daily net intake — and finds that only 24 of 720
+observations (3.3%) qualify, concentrated almost entirely in 2024 (22 of 24). Fourth, it evaluates five
+forecasting models under a chronological 80/20 split and reports a deliberately uncomfortable result:
+persistence beats every fitted model, with the naive last-value forecast reaching MAE 12.0, RMSE
+15.1 and R² 0.993, while Holt's damped-trend model returns a negative R² (−1.396) and ARIMA(1,1,1)
+returns −7.79 — a finding attributed to a structural level shift between the training and test regimes rather
+than to any model defect, and one that is presented as a methodological warning rather than suppressed.
+Fifth, it delivers the entire analysis as a deployed, interactive Streamlit dashboard so that non-technical
+stakeholders can interrogate the same evidence the authors used.
+The paper argues that the operational question for this system is not "how many children are in care" but
+"how quickly is the flow being cleared relative to how quickly it is arriving." On this evidence, the second
+quantity — throughput — has improved substantially over the study period even as the first has collapsed,
+and the marginal value of further forecasting work in this dataset is currently low relative to its cost. It
+closes with an explicit account of the study's limitations — irregular reporting cadence, stock-versus-flow
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 1/38
+definitional inconsistencies, non-uniform federal emergency-policy regimes, and a small, single-country,
+single-agency data scope — and a set of ethical commitments governing any operational reuse of the work.
+Keywords: unaccompanied children; ORR; HHS; CBP; caseload analytics; load pressure; capacity
+planning; time-series forecasting; reproducible analytics; Streamlit.
+1. Introduction
+1.1 The operational question
+Every federal care system faces the same arithmetic problem: demand arrives as a flow, but capacity is
+provisioned as a stock. A system that admits children faster than it can resolve them accumulates a
+backlog; a system that discharges faster than it admits drains. Most of the public discourse about the UAC
+program has focused on the numerator — the number of children in care — largely because that is the
+number that photographs well and legislates easily. This paper deliberately foregrounds the rate instead.
+The Unaccompanied Alien Children program is an unusually well-suited subject for this reframing,
+because it is a literal two-stage queueing network. Children first present to CBP, are held in short-duration
+border custody, and are then transferred into the care of ORR and its network of private care providers,
+where they remain until a case-resolution pathway is completed. The CBP stage is a transient buffer of a
+few days; the HHS stage is a custodial population that persists for months. Analysing only the aggregate
+obscures the fact that these are two populations with radically different dynamics, and that the binding
+constraint is almost always the second.
+1.2 What this study does
+This study builds and evaluates a complete, reproducible analytical pipeline over federal operational data.
+It is deliberately narrow in scope and deliberately complete in execution. The pipeline runs from raw file to
+deployed dashboard with no manual steps between stages, and every intermediate artefact is written to
+disk so that results are auditable rather than merely asserted.
+Concretely, the study makes the following contributions:
+1. A documented, executable cleaning pipeline that handles the specific failure modes present in
+the ORR public extract, including comma-formatted numerals, reverse-chronological ordering, and a
+large block of trailing null rows.
+2. An explicit data-quality validation layer encoding three business-rule invariants (transfers
+cannot exceed the stock they are drawn from; discharges cannot exceed the population they are drawn
+from; counts cannot be negative) and reporting the 86 violations found.
+3. A derived feature set translating raw stock-and-flow counts into eight analytically meaningful
+indicators of system state and change.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 2/38
+4. A load-pressure framework that converts the continuous caseload series into an actionable binary
+classification of "the system is loaded and still absorbing net inflow."
+5. An honest forecasting benchmark that reports model performance including, prominently, the
+result that the benchmark was won by the no-model baseline.
+6. A deployed interactive dashboard implementing the analysis for stakeholder consumption.
+1.3 Structure of the paper
+Sections 2 and 3 establish the institutional background and the prior analytical literature. Section 4 states
+the research problem formally and Section 5 enumerates the objectives derived from it. Sections 6 through
+10 document the data, preprocessing, validation, exploration and feature engineering stages. Sections 11
+and 12 introduce the KPI framework and the load-pressure analysis. Sections 13 and 14 present the
+forecasting exercise and its evaluation. Section 15 describes the deployed dashboard. Section 16
+consolidates findings, Section 17 translates them into operational recommendations, and Sections 18
+through 21 address limitations, ethics, conclusions and references.
+2. Background
+2.1 Institutional background
+The UAC program is a federally funded, federally operated system for children who enter the United States
+without a parent or legal guardian. Its structure has three components: ORR, which awards grants to care
+providers and sets policy; CBP, which exercises statutory custody at the border; and the network of
+contracted care providers — largely non-governmental organisations operating under ORR grants —
+which deliver case management, shelter, education and legal services.
+The statutory frame is the Trafficking Victims Protection Reauthorization Act of 2008, which established
+statutory parameters for expedited removal of unaccompanied children and created the legal basis for
+ORR's statutory care mandate. Executive Order 13867 (June 2018) reshaped processing and made initial
+asylum screening by a specially-trained officer the default for children encountered by CBP, which
+materially shortened average time in CBP custody. Subsequent policy changes, including the Title 42
+public-health order (2020–2023) and the associated border regulation, caused extremely large
+fluctuations in the observed caseload during the earlier part of this study's window and the phase-out of
+those measures in 2023 coincide with the sharp decline documented here.
+2.2 Why the data is analytically interesting
+Three features make the UAC data set a productive and somewhat difficult analytical subject.
+First, it is a two-stage flow network. Nearly all capacity analysis for single-stage systems must be rederived for this one. The mean CBP custody stock of 171.5 children against a mean HHS care population of
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 3/38
+6,061.3 makes the asymmetry stark: 97.2% of the total system caseload sits in the long-duration stage.
+Second, the reporting cadence is irregular. The ORR extract contains observations on most but not
+all calendar days. Over the 1,075-day study window, 720 dates are present and 355 are absent — 33.0% of
+the calendar. Critically, the gaps are structured rather than random: of 719 inter-observation intervals, 558
+are one day, 122 are three days, and 23 are four days. This is a reporting-cadence artefact, not a signal
+about the underlying population, and treating the series as uniformly daily would be a methodological
+error.
+Third, the definition of a flow is ambiguous across stages. The 86 flagged records documented in
+Section 8 are not arithmetic mistakes; they are almost certainly the product of HHS reporting daily
+transfers from a stock snapshot that is itself measured on a different administrative cadence. This is a
+definitional inconsistency, and it is treated as such.
+2.3 Related work
+Three literatures inform this study. The first is forecasting methodology and competitive
+evaluation (Hyndman & Athanasopoulos, 2021; Makridakis, Spiliotis, & Assimakopoulos, 2018, 2022;
+Petropoulos et al., 2022; Box, Jenkins, Reinsel, & Ljung, 2015). This literature has established, across
+multiple large-scale competitions, the twin facts that (a) simple methods frequently outperform complex
+ones, and (b) evaluation protocol — particularly the treatment of structural breaks — determines
+conclusions more than model choice does (Tashman, 2000; Bergmeir & Benítez, 2012). This study's
+forecasting result (Section 14) is a direct, if unusually stark, instance of (a) and (b), and the paper treats it
+as corroborating rather than anomalous.
+The second is practical time-series decomposition and anomaly detection, where Loess-based
+decomposition (Cleveland, Cleveland, McRae, & Terpenning, 2020) provides the standard route to
+separating trend from seasonality from remainder, and where robust statistics (Huber & Ronchetti, 2009)
+provide the machinery for handling contamination. The third is the broader analytics engineering
+and reproducible-research literature (Anscombe, 1973; Pedregosa et al., 2011; Harris et al., 2020;
+McKinney, 2010; Hunter, 2007; Waskom, 2021; Wilson et al., 2017), which supplies the conventions this
+study follows: explicit data-quality checks before inference, reproducible pipelines, and a separation of
+exploration from confirmation.
+3. Background: Analytical Context
+3.1 Stock, flow, and the steady-state fallacy
+The most common analytical error in capacity planning is to treat a cumulative count as a rate. The UAC
+program publishes both, and the two behave completely differently. Over the study window:
+The stock (children in care) fell by 70.9% in mean terms, 2023 → 2025.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 4/38
+The flow (daily transfers into HHS care, mean 128.7) remained comparatively stable and, in 2024, the
+cumulative flow balance was slightly positive (+863 children net) even as the stock fell sharply.
+This is the signature of a system draining faster than it was filling — the desirable condition — rather
+than a system in which children are being released. Any reading that conflates a falling stock with a rising
+release rate will get this exactly backwards, and the paper returns to this point in Section 16.
+3.2 The relationship between arrivals and throughput
+The correlation structure supports the two-stage reading. Correlation with total system load is 0.92 for
+HHS discharges, 0.73 for CBP transfers, 0.71 for apprehensions and 0.69 for CBP custody stock. The
+stronger association with throughput than with arrivals is precisely what one expects if the caseload is
+discharge-governed rather than admission-governed: HHS resolves a case, the child leaves the population,
+and the population falls.
+The lag structure reinforces this. Transfers out of CBP custody correlate with the following day's CBP
+custody stock at r = 0.899, confirming that the flow variable leads the stock variable by one observation —
+the expected signature of a queue being drained into a downstream stage. Discharges correlate
+contemporaneously with the HHS population at r = 0.921.
+3.3 What a useful dashboard must do
+An operational dashboard that only plots the stock line is decorative. The value-add is in the derived
+quantities: the net balance of inflow and outflow, the rate of change of the total, and a pressure
+classification that answers the manager's actual question — "is this getting worse?" — with a defensible
+threshold. The KPI framework of Section 11 and the pressure indicator of Section 12 are designed to supply
+exactly those quantities.
+4. Problem Statement
+4.1 Formal statement
+Let the UAC system on observation i be described by four stock and flow variables drawn from the ORR
+extract:
+A_i — children apprehended and placed in CBP custody on day i (arrivals, flow)
+C_i — children in CBP custody on day i (stage-1 stock)
+T_i — children transferred out of CBP custody on day i (stage-1 flow, into HHS)
+H_i — children in HHS care on day i (stage-2 stock)
+D_i — children discharged from HHS care on day i (stage-2 flow, out of system)
+The research problem is stated as three questions.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 5/38
+RQ1 (Composition). How is total system caseload distributed across the two custody stages, and how
+has that distribution and its aggregate moved over the study window?
+RQ2 (Pressure). On what observable conditions can the system be classified as being under load
+pressure — a high caseload that is still absorbing net inflow — as distinct from merely high caseload or
+merely positive inflow?
+RQ3 (Predictability). To what extent is future total system load predictable from this data under a
+defensible, chronologically honest evaluation protocol, and which model class — if any — adds value over a
+persistence baseline?
+4.2 Scope boundaries
+This study is limited to the single public ORR extract named in Section 6. It does not use case-level or
+person-level data, it makes no claim about any individual child's circumstances or outcomes, and it does
+not attempt causal inference. The analysis is descriptive and predictive; it is not evaluative. Stating this
+boundary up front is essential, because the temptation to read a caseload trend as a policy verdict is
+precisely the inference error Sections 18 and 19 exist to prevent.
+5. Objectives
+The problem statement generates seven measurable objectives. Each is stated with its deliverable, so that
+completion is objectively checkable.
+# Objective Deliverable Section
+O1 Produce a cleaned, typed, chronologically ordered analysis-ready
+dataset from the raw federal extract
+uac_care_cleaned.csv ,
+uac_cleaned.csv
+7
+O2 Quantify and characterise data-quality defects against explicit
+business-rule invariants
+Validation flag set + report 8
+O3 Characterise the composition, distribution and temporal evolution of
+the caseload
+EDA artefacts, Figures 1–5 9
+O4 Derive a feature set that captures system state, change, momentum
+and volatility
+uac_features.csv (17 columns) 10
+O5 Define an operational KPI framework grounded in the derived
+features
+KPI table with formulas and
+thresholds
+11
+O6 Classify load-pressure periods via a distribution-anchored,
+transparent rule and analyse their structure
+Pressure analysis + Figure 4 12
+O7 Benchmark forecasting models against a persistence baseline under
+chronological evaluation and deploy the analysis interactively
+Model table (5 models) +
+Streamlit app
+13–15
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 6/38
+Objectives O1, O2 and O4 are deterministic and their completion is verifiable by re-running the pipeline.
+Objectives O3, O6 and O7 produce statistics that are reported in full, including the unfavourable ones. O5
+is a design deliverable and is argued rather than measured.
+6. Dataset Description
+6.1 Source and provenance
+The dataset is the HHS/ORR Unaccompanied Alien Children Program public operational report,
+retrieved as a single CSV named HHS_Unaccompanied_Alien_Children_Program.csv and placed in
+data/raw/ . It is a public aggregate extract: it contains daily counts only, with no case identifiers, no
+demographic breakdowns beyond nothing at all, and no personally identifiable information. The structural
+consequence — that this study is structurally incapable of privacy harm at the individual level — is
+developed in Section 19.
+6.2 Structure
+The raw file contains 1,170 rows and 6 columns. Of these, 720 rows carry valid data and 450
+rows are entirely null — a block of trailing blank lines that survived the source export. Data is
+presented in reverse chronological order, with the most recent record (21 December 2025) on line 2.
+The 720 valid observations span 12 January 2023 to 21 December 2025, a window of 1,075 calendar
+days.
+One column name carries an asterisk in the source: Children apprehended and placed in CBP custody* .
+The asterisk denotes a source footnote not reproduced in the extract. Because the extract does not carry
+the footnote text, the column is renamed to cbp_apprehended in the cleaned output with the semantics
+recorded in Table 1 and the caveat preserved in Section 18.
+6.3 Column dictionary
+Table 1. Raw extract column dictionary and analytical type.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 7/38
+# Raw column name Cleaned name Type Role Observed range
+1 Date date datetime Index 2023-01-12 →
+2025-12-21
+2 Children apprehended and placed
+in CBP custody*
+cbp_apprehended int Flow — arrivals at
+border
+0 – 333
+3 Children in CBP custody cbp_in_custody int Stock — stage 1 7 – 531
+4 Children transferred out of CBP
+custody
+cbp_transferred_out int Flow — stage 1 →
+stage 2
+0 – 440
+5 Children in HHS Care hhs_in_care int Stock — stage 2 1,972 – 11,516
+6 Children discharged from HHS
+Care
+hhs_discharged int Flow — stage 2 →
+released
+0 – 505
+The five count columns are presented as strings in the raw file, with thousands separators (e.g. "2,484" ).
+This is the single most common ingestion failure mode for government statistical extracts and is handled
+explicitly in Section 7.
+6.4 Temporal coverage and reporting cadence
+Observations are distributed across years as follows: 230 in 2023, 251 in 2024, 239 in 2025 — an
+approximately even density that conceals a major structural change, as Section 9 shows. Coverage is not
+complete, and the pattern of absence is informative:
+Expected calendar dates in window: 1,075
+Observed dates: 720 (66.97%)
+Missing calendar dates: 355 (33.03%)
+Inter-observation intervals longer than one day: 161 of 719 (22.4%)
+Interval distribution: 1 day × 558; 2 days × 10; 3 days × 122; 4 days × 23; 5 days × 3; 6 days × 1; 7 days
+× 1; 10 days × 1
+The dominance of exactly 3-day gaps (122 occurrences) strongly suggests a scheduled reporting rhythm of
+publication every third day, with daily publication added during the high-volume period. This is the
+central reason the study models the series by observation index rather than by calendar day, and it is
+carried forward as a first-order limitation (Section 18).
+6.5 Summary statistics
+Table 2. Descriptive statistics for the 720 clean observations.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 8/38
+Variable Mean Std Min Q1 Median Q3 Max
+cbp_apprehended 93.52 72.65 0 12.00 99.00 147.25 333
+cbp_in_custody 171.49 126.35 7 36.00 193.00 263.25 531
+cbp_transferred_out 128.67 97.32 0 14.00 157.00 199.25 440
+hhs_in_care 6,061.28 2,833.07 1,972 2,467.75 6,406.50 8,010.25 11,516
+hhs_discharged 173.41 125.70 0 19.75 181.00 267.00 505
+total_system_load 6,232.77 2,918.46 2,002 2,500.75 6,633.50 8,249.50 11,762
+net_intake −44.74 95.86 −465 −94.25 −11.50 5.25 206
+daily_load_change −5.73 140.28 −922 −34.00 6.00 64.00 730
+care_load_growth_rate (% ) −0.12 1.90 −11.60 −0.69 0.12 0.86 8.34
+discharge_offset_ratio 2.01 3.06 0.00 0.86 1.28 2.03 43.27
+Four observations follow immediately from Table 2 and are developed in Section 9.
+1. The system is HHS-dominated. Mean HHS care (6,061) exceeds mean CBP custody (171) by a
+factor of 35.3. Expressed as a share of total load, HHS care is 97.2% and CBP custody 2.8%.
+2. The stock is far more dispersed than the flows. The coefficient of variation is 0.47 for
+hhs_in_care and 0.74 for cbp_in_custody , but only 0.56 for the 7-observation total. The flows
+( hhs_discharged CV 0.72, cbp_transferred_out CV 0.76) are proportionally more volatile than the
+stocks they modify.
+3. Net intake is negative on the majority of observations: 475 negative, 238 positive, 7 zero. The
+cumulative balance over the full window is −32,212 children, consistent with a net contraction
+across the three years.
+4. The discharge_offset_ratio has a heavy right tail (max 43.27 against a median of 1.28) driven by
+a small number of observations with near-zero transfers. This ratio is retained in the feature set but
+flagged as sensitive at the denominator; it is excluded from the KPI framework in Section 11 for that
+reason.
+7. Data Preprocessing
+Preprocessing is implemented twice in the repository, deliberately: once as a reusable library module
+( src/data_cleaning.py , exposing clean_uac_data() ) and once as an executable narrative
+( notebooks/01_data_cleaning.ipynb ) whose purpose is inspection. The duplication is discussed candidly
+in Section 18; the pipeline executes seven steps.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 9/38
+7.1 Null-row removal
+The first operation is df.dropna(how="all") , which removes the 450 entirely-null trailing rows and
+reduces the frame from 1,170 to 720 rows. This is a structurally-motivated deletion — these rows carry no
+measurement of anything — and the count is reported rather than silently applied, in keeping with
+Anscombe's (1973) principle that the reader must be able to see what was discarded.
+7.2 Column standardisation
+Raw column names are stripped of whitespace and mapped to snake_case via an explicit six-entry
+dictionary (Table 1). The mapping is written as a literal dict rather than applied by a regex or a fuzzy
+match, so that a future change to the source file produces a visible, diagnosable failure instead of a silent
+misalignment.
+7.3 Numeric coercion
+Each of the five count columns is coerced through a four-step chain: cast to string → strip thousands
+separators with str.replace(",", "", regex=False) → pd.to_numeric(errors="coerce") →
+fillna(0).astype(int) . The regex=False flag is required: the default regex=True behaviour would treat
+the comma as a pattern delimiter. The fillna(0) step is the one genuinely contestable choice in the
+pipeline and is examined in Section 8.
+7.4 Date parsing and ordering
+Dates arrive as strings of the form "December 21, 2025" and are parsed with pd.to_datetime . Because
+the source is in reverse chronological order and the first row is not the earliest date, the frame is then
+sorted ascending and re-indexed with reset_index(drop=True) . Omitting this sort is the second most
+likely ingestion error after the comma-handling issue, and it would silently reverse every time-series
+operation downstream.
+7.5 Path resolution
+The library resolves the raw file across four candidate locations (project root, current working directory,
+an alternate local path, and the user's Downloads folder) before raising a FileNotFoundError with an
+actionable message. This is a defensive measure against the very common failure in notebook-heavy
+projects where the working directory differs from the project root. It does not affect analytical results.
+7.6 Initial derived fields
+Three fields are created in the library at this stage: hhs_net_daily_change (=T_i - D_i), and calendar fields
+year , month and day_of_week . The remaining derived features are produced by the feature-engineering
+stage (Section 10) and written to uac_features.csv .
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 10/38
+7.7 Persistence
+The cleaned frame is written to data/processed/ with index=False . The project currently emits two
+cleaned artefacts — uac_care_cleaned.csv (from the library) and uac_cleaned.csv (from the notebook)
+— both of 720 rows. See Section 18.
+8. Data Quality Validation
+Validation is treated as a first-class analytical stage, not as a debugging step. Three invariants are checked
+and each is expressed as a column so that violations can be inspected, counted and plotted.
+8.1 Invariant 1 — transfer conservation
+transfer_invalid := cbp_transferred_out > cbp_in_custody
+A daily transfer out of CBP custody cannot exceed the stock it is drawn from if both quantities are
+measured on the same day and the stock is measured before the transfer. 86 of 720 records (11.94%)
+violate this invariant.
+8.2 Invariant 2 — discharge conservation
+discharge_invalid := hhs_discharged > hhs_in_care
+0 of 720 records violate this invariant. The discharge figure is always consistent with the population
+it is drawn from, confirming that the HHS-side reporting is internally coherent.
+8.3 Invariant 3 — non-negativity
+No negative values occur in any of the five raw count columns. Negative values do occur in derived
+difference columns, which is expected and correct: net_intake takes negative values on 475 observations,
+daily_load_change on 326 and net_intake_7obs on 466. A negative derived value is a signal, not an
+error.
+8.4 Composite flag
+data_quality_flag := transfer_invalid | discharge_invalid
+86 flagged records (11.94%), identical to the transfer-violation count because the discharge set is
+empty.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 11/38
+Table 3. Data-quality validation results.
+Check Rule Violations Share of 720
+Transfer conservation T_i > C_i 86 11.94%
+Discharge conservation D_i > H_i 0 0.00%
+Non-negativity (raw counts) any value < 0 0 0.00%
+Composite flag transfer_invalid OR discharge_invalid 86 11.94%
+Missing calendar dates — 355 33.03%
+Duplicate dates — 0 0.00%
+Unparseable dates (post-cleaning) — 0 0.00%
+8.5 Diagnosis of the transfer violations
+The 86 violations are not arithmetic errors. Their structure is diagnostic:
+Median CBP custody stock on violating days: 158
+Median daily transfers on violating days: 182
+Distribution by year: 2023 → 43; 2024 → 31; 2025 → 12
+Date range: 24 January 2023 to 27 February 2025
+Most recent violation: 27 February 2025 — none in the final ten months of the window
+The systematic excess of transfers over the same-day stock, the presence on 12% of days, and the complete
+disappearance after February 2025 all point to a definitional mismatch rather than a recording
+error: the Children in CBP custody figure is a periodic administrative stock snapshot, while Children
+transferred out of CBP custody is a period-total flow. When a stock is sampled less frequently than the
+flow it bounds, flow totals for a period can legitimately exceed the sampled stock. The post-February-2025
+cessation is consistent with a change in CBP's reporting practice, not with a change in the underlying
+process.
+8.6 Treatment policy
+Three treatment options were considered:
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 12/38
+Option Description Rejected because
+A. Zero-fill Replace violating transfers with the stock value Fabricates data; destroys the genuine
+signal that transfers exceeded the
+sampled stock
+B. Drop
+violating
+rows
+Remove 86 records (11.9%) Systematic, non-random removal biases
+the series; violates the already-dense
+constraint on the calendar
+C. Flag and
+retain
+Emit transfer_invalid / data_quality_flag , retain the
+record, and exclude flagged rows from any analysis that
+depends on the CBP stock being binding
+Preserves the observation and the
+information about the defect
+Option C is adopted. This is the study's general data-quality position: the defect is metadata about the
+data, and the correct response is to carry it forward explicitly rather than to launder it away. The
+dashboard surfaces the flag count directly so that no consumer of the analysis is unaware that 12% of
+records carry it.
+8.7 What the audit found that a summary statistic would not
+The value of this stage is demonstrated by the missing-date audit. Had the 355 absent calendar days been
+silently forward-filled with zeros — the default behaviour of a naïve resample('D').sum() — the analysis
+would have reported 355 days of zero system activity and driven mean load down by roughly a third. The
+33% under-reporting would have been recast as a collapse in caseload. The audit prevents that specific and
+severe error, and the dashboard repeats the warning verbatim to its users.
+9. Exploratory Data Analysis
+9.1 The dominant feature: a regime shift
+The single most important structure in the data is a monotonic, large-scale decline in caseload that
+dominates every other pattern.
+Table 4. Annual comparison across the study window.
+Year Observations Mean total
+load
+Mean CBP
+stock
+Mean HHS
+stock
+Net intake
+(cumulative)
+Mean net
+intake
+2023 230 8,846.5 — — −30,120 −131.0
+2024 251 7,319.9 — — +863 +3.4
+2025 239 2,575.7 — — −2,955 −12.4
+Quarterly resolution locates the inflection more precisely than annual aggregation can:
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 13/38
+Table 5. Mean total system load by quarter (from Figure 1).
+Quarter Mean load Quarter Mean load
+2023 Q1 7,963 2024 Q3 6,409
+2023 Q2 7,627 2024 Q4 6,385
+2023 Q3 9,152 2025 Q1 3,383
+2023 Q4 10,473 2025 Q2 2,405
+2024 Q1 8,835 2025 Q3 2,117
+2024 Q2 7,617 2025 Q4 2,357
+The trajectory is unambiguous: build through 2023 to a Q4 peak of 10,473, gentle erosion through 2024,
+and a 74.7% step-down between 2024 Q4 and 2025 Q1 (6,385 → 3,383). The peak daily observation
+of 11,762 children occurred on 20 December 2023; the trough of 2,002 occurred on 24 August 2025.
+Figure 1
+Figure 1. Total system load (CBP + HHS) with 7-observation rolling mean and the 75th-percentile highload threshold. The rolling mean damps the quarterly sawtooth produced by the alternating observation
+gaps; the threshold line marks the boundary used by the pressure framework of Section 12.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 14/38
+9.2 Stage composition
+Figure 2
+Figure 2. Caseload by custody stage. The HHS line sits two orders of magnitude above the CBP line on
+any linear scale — itself a finding, since it means CBP-stage movements are visually invisible in a
+combined plot. The analytical consequence is that no useful combined index can be plotted linearly; the
+two stages must be read separately or on a log scale.
+Both stages fall together, and they fall together fast: CBP custody declines more sharply in proportional
+terms than HHS care, consistent with a policy-driven contraction of border-stage processing rather than of
+the care caseload itself.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 15/38
+9.3 Flow dynamics
+Figure 3
+Figure 3. (a) Daily throughput — transfers out of CBP custody and discharges from HHS care; (b) net
+intake, red where positive (inflow exceeds outflow) and blue where negative.
+Throughput tracks stock closely, as the correlation structure of Section 3.2 predicts (discharges vs HHS
+stock r = 0.921; transfers vs next-day CBP stock r = 0.899). The net-intake panel is the analytically
+valuable one: it is a signed series whose cumulative value distinguishes system expansion from system
+drainage regardless of the absolute stock level.
+Cumulative net intake over the full window is −32,212 children, composed of −30,120 in 2023, +863 in
+2024 and −2,955 in 2025. The 2023 figure reflects the peak build; the 2024 figure is the only year in which
+the system absorbed slightly more than it released, and it is worth noting that this occurred while the stock
+was falling — 2024 net intake of +3.4 per observation on a mean load of 7,320 coexists with a 17.2%
+annual fall in mean stock. The two facts are only reconcilable because throughput was rising faster than
+inflow; the aggregate stock fell even while the balance was marginally positive.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 16/38
+9.4 Monthly structure
+Figure 5
+Figure 5. (a) Monthly mean caseload decomposed by custody stage; (b) monthly cumulative net intake.
+Monthly aggregation shows the same 2023→2025 trajectory compressed, with a visible seasonal
+component superimposed. The monthly net-intake series changes sign repeatedly in 2023 and 2024
+before settling persistently negative through 2025, indicating that by the final year the system was
+draining in every observed month rather than oscillating.
+9.5 Day-of-week structure — reported, then discounted
+Mean total load by day of week ranges from 4,407.5 (Friday) to 6,334.7 (Wednesday). This apparent
+30% weekday effect should not be interpreted as a staffing or arrivals rhythm, for two reasons
+that the analysis itself supplies. First, the reporting cadence is not daily (Section 6.4), so weekday
+assignment is confounded with publication rhythm — a day that appears rarely in the calendar appears
+disproportionately at certain points in the cycle. Second, and decisively, the Friday minimum is almost
+entirely a composition effect: the mean is computed over a period in which the level collapsed by 70%, and
+later years — with a different mix of weekdays among their surviving observations — dominate the low
+end. A proper test would require a de-trended or within-year weekday analysis, which this dataset's
+cadence does not cleanly support.
+The honest statement is: a weekday effect is present in the marginal means and is confounded with both
+reporting cadence and the secular level shift; this study does not claim a weekday effect. This is recorded
+in Section 18 as an example of a plausible-looking pattern deliberately not asserted.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 17/38
+9.6 Correlation structure
+Table 6. Pearson correlation with total system load (n = 720).
+Variable r with total load Reading
+hhs_in_care 1.000 Constituent — definitional
+hhs_discharged 0.920 Throughput dominates stock composition
+cbp_transferred_out 0.734 Stage-1 throughput, weaker
+cbp_apprehended 0.710 Arrivals — weakest of the flows
+cbp_in_custody 0.685 Stage-1 stock
+net_intake −0.460 Directionally opposing, as expected
+The ordering is the result. Caseload is more strongly associated with how fast children are being
+released (0.920) than with how many are being apprehended (0.710). The population is dischargegoverned, and any capacity conversation that begins with arrival numbers begins with the weaker
+predictor.
+10. Feature Engineering
+Eight features are derived in notebooks/02_feature_engineering.ipynb and persisted to
+uac_features.csv , which carries 720 rows and 17 columns. They are grouped into four families by
+analytical purpose.
+Table 7. Derived feature set.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 18/38
+Feature Definition Family Rationale
+total_system_load C_i + H_i State Single index of aggregate caseload
+net_intake T_i - D_i State Signed inflow−outflow balance
+daily_load_change \Delta(C+H) Change First difference; raw momentum
+care_load_growth_rate \text{pct\_change}(C+H)\times
+100
+Change Scale-free momentum; comparable across
+regimes
+load_7d_avg 7-obs rolling mean,
+min_periods=3
+Momentum Smooths the reporting-cadence sawtooth
+net_intake_7obs 7-obs rolling sum Momentum Cumulative pressure over a recent window
+load_volatility_7obs 7-obs rolling std of
+daily_load_change
+Risk Instability; early-warning for shocks
+discharge_offset_ratio D_i / T_i where T_i > 0 Relationship How effectively stage-1 inflow is offset by
+stage-2 outflow
+10.1 Design notes
+min_periods=3 on all rolling windows. With 161 multi-day gaps in the series, a 7-observation window
+is not a 7-day window; on this data it spans a median of roughly 10–12 calendar days. The min_periods=3
+choice ensures the feature is populated from the third observation onward rather than emitting a long
+ragged NaN prefix, at the cost of making the early-window values noisier. This is a deliberate
+accuracy/usability trade-off, documented rather than hidden.
+pct_change is used alongside absolute difference. A 1% change means something very different at a
+caseload of 10,000 than at 2,000. care_load_growth_rate is the only feature in the set that is comparable
+across the 2023 and 2025 regimes, and it is therefore the correct basis for any cross-period statement.
+discharge_offset_ratio is retained but demoted. Its median of 1.28 is interpretable and useful, but
+its maximum of 43.27 arises on days with near-zero transfers, and it is undefined on 3 observations. It is
+excluded from the KPI framework for that reason and is a good illustration of a feature that is analytically
+interesting but operationally fragile.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 19/38
+10.2 Feature-level summary
+Feature Valid obs Mean Std Min Max
+total_system_load 720 6,232.77 2,918.46 2,002 11,762
+net_intake 720 −44.74 95.86 −465 206
+daily_load_change 719 −5.73 140.28 −922 730
+care_load_growth_rate 719 −0.12 1.90 −11.60 8.34
+load_7d_avg 718 — — — —
+net_intake_7obs 254 — — — —
+load_volatility_7obs 713 — — — —
+discharge_offset_ratio 717 2.01 3.06 0.00 43.27
+The validity counts are themselves informative. net_intake_7obs is populated on only 254 of 720
+observations because a 7-observation rolling sum of a series containing negative values and NaN
+propagation from the min_periods rule produces NaN wherever any constituent window is incomplete.
+This feature is effectively unusable at this cadence and is not carried into the KPI
+framework — a finding produced by the feature-engineering stage and recorded here rather than
+discovered later in a dashboard.
+11. KPI Framework
+The following framework translates the derived features into named operational indicators. Each KPI is
+defined with its formula, its update cadence, its interpretation and — critically — its failure condition, the
+circumstance in which the KPI should not be trusted. The inclusion of failure conditions is a deliberate
+departure from conventional KPI tables and reflects Anscombe's (1973) warning that readers of statistics
+are owed the conditions under which a summary ceases to mean what it appears to mean.
+Table 8. Operational KPI framework for the UAC care system.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 20/38
+KPI Formula Cadence Interpretation Failure condition
+K1 — Total
+System Load
+C_i + H_i Per
+observation
+Total children under
+federal responsibility
+Meaningless as a rate; see
+K4
+K2 — Stage
+Share (HHS)
+H_i / (C_i + H_i) Per
+observation
+Fraction of caseload in
+long-duration care;
+currently ≈ 97%
+Becomes unstable if C_i +
+H_i is near zero (never
+observed)
+K3 — Net Intake T_i - D_i Per
+observation
+Inflow − outflow;
+positive = system
+expanding
+Defers all transfer to HHS,
+mis-defining the
+boundary
+K4 — Net Intake
+Rate
+(T_i - D_i) / (C_i + H_i) \times
+100
+Per
+observation
+Drain (−0.72%/obs
+mean) vs expansion;
+the headline capacity
+KPI
+Unstable at low load in
+absolute terms; use the
+rate
+K5 —
+Throughput
+Efficiency
+D_i / T_i Per
+observation
+Offset ratio; 1.00 =
+balance, >1 =
+expanding, <1 =
+draining
+Undefined at T_i = 0;
+extreme at small T_i (see
+§10.1)
+K6 — Load
+Momentum
+care_load_growth_rate Per
+observation
+Scale-free % change;
+the only cross-regimecomparable KPI
+Inflated by the small
+denominators of the 2025
+low-load regime
+K7 — Load
+Volatility
+load_volatility_7obs (7-obs
+std of Δload)
+Per
+observation
+Instability; earlywarning of shocks
+Depends on observation,
+not calendar, spacing —
+see §6.4
+K8 — High-Load
+Status
+1[(C_i + H_i) \ge Q_{75}] Per
+observation
+Binary capacity-state
+flag; threshold =
+8,249.5
+Threshold is in-sample
+and drifts downward as
+load falls; must be rederived per year
+K9 — Data
+Quality Flag
+1[\text{transfer\_invalid} \vee
+\text{discharge\_invalid}]
+Per
+observation
+Whether the record
+carries a known
+definitional defect
+Silence is not assurance —
+33% of calendar dates are
+absent entirely
+K10 —
+Reporting
+Completeness
+Observed / expected dates in
+window
+Rolling Currently 67.0% The denominator changes
+with the window; define it
+precisely or the KPI is
+meaningless
+Which KPIs are recommended for operational use. K1, K2, K3, K4, K6, K7 and K9 form the
+recommended operational set. K5 is restricted to days where T_i exceeds a stated minimum. K8 requires
+annual re-derivation and should not be used as a fixed threshold. K10 is a meta-KPI that belongs on the
+dashboard permanently, because it conditions the interpretation of all others.
+K4 is the KPI the study recommends elevating. Total caseload (K1) is the number organisations
+report, because it is the easiest to explain and the most politically salient. It is also, per Section 9.6, the
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 21/38
+number least diagnostic of whether the system is working. K4 — net intake as a rate against the population
+— falls when throughput exceeds inflow, which is the condition a well-functioning system should be in.
+The 2024 result is the illustration: cumulative net intake was positive (+863) while mean stock fell 17.2%.
+Under K1, 2024 looks like a bad year. Under K4, it looks like a system in near-balance. Both readings are
+arithmetically correct; only one is operationally useful.
+12. Load Pressure Analysis
+12.1 Definition
+The pressure construct combines the two conditions that jointly define operational strain. A high caseload
+alone is not pressure — a large, well-resourced system holding 9,000 children is not necessarily under
+strain. Positive net intake alone is not pressure either — a small system growing from 200 to 220 children
+is not under strain. Pressure is the conjunction.
+$\text{LoadPressure}_i = \mathbb{1}\!\left[\text{TotalSystemLoad}_i \ge Q_{75}\right] \cdot
+\mathbb{1}\!\left[\text{NetIntake}_i > 0\right]$
+The 75th-percentile threshold is computed in-sample and equals 8,249.5 children. It is used rather
+than an absolute capacity figure because the source contains no published bed-capacity or staffing
+denominator, and inventing one would fabricate the most decision-relevant parameter in the entire
+analysis. The percentile threshold is a relative strain indicator — "loaded relative to this system's own
+recent history" — and Section 12.5 states explicitly what it is not.
+12.2 Distribution of the three indicators
+Indicator Count Share of 720
+High load (≥ Q75 = 8,249.5) 180 25.00%
+Positive net intake (> 0) 238 33.06%
+Load pressure (both) 24 3.33%
+The intersection is 3.3% of observations. Positive net intake is only modestly more common than the
+~23% expected under a null of random independence between the two conditions, indicating that the two
+indicators are close to independent in this sample — high load does not systematically coincide with net
+inflow.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 22/38
+12.3 Temporal structure of pressure periods
+Year High-load obs. Positive-intake obs. Pressure obs.
+2023 128 87 2
+2024 52 100 22
+2025 0 51 0
+The temporal structure is the finding. All 128 high-load observations in 2023 produced only 2
+pressure days, because 2023's inflows were overwhelmingly negative — the system was building a backlog,
+and the flows show it. Conversely, 2024 produced 22 of the 24 pressure days despite containing only 52
+high-load observations, because 2024 was the one year with a net-positive intake balance. In 2025 neither
+condition is met, and pressure events vanish entirely.
+Pressure periods are therefore not a property of caseload magnitude. They are a property of caseload
+magnitude combined with adverse flow direction, and that combination occurred in a specific
+window — predominantly 2024 — and has since ceased.
+Figure 4
+Figure 4. Load-pressure periods. Grey points are below the Q75 threshold, red points are high-load days,
+and ringed points (n = 24) satisfy both conditions. The visual confirms that the pressure subset is not a
+contiguous episode but scattered single observations within a broader high-load band.
+12.4 Characterisation of pressure days
+The 24 pressure observations share a common signature: they occur on high-load days that nevertheless
+register small positive net intake. The mean net intake on pressure days is small relative to the flow
+magnitudes involved, indicating that these are not days of acute surge but days on which a heavily loaded
+system failed to make net progress. This distinction matters operationally: a surge response (adding
+capacity) and a marginal-drain response (accelerating existing throughput) are different interventions,
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 23/38
+and the pressure construct is designed to flag the second, which is the harder and more common
+operational problem.
+12.5 Limits of the construct
+Four limitations are stated so that the indicator is not over-read.
+1. The threshold is in-sample and non-stationary. A fixed 8,249.5 is a high bar in 2025 (when the
+maximum observation is roughly 3,400) and a low bar in 2023. Because the system contracted 70.9%,
+the in-sample Q75 is dominated by 2023–2024 conditions. Re-deriving the threshold per year would
+change the 2025 classification from "no pressure" to "most days are pressure" — the indicator is
+meaningless across the regime shift unless re-based. This is a genuine weakness, and the reason K8
+carries an explicit re-derivation warning in Table 8.
+2. No absolute capacity benchmark exists. Without a published bed count, staff ratio, or licensed
+capacity, this measures relative strain only. It cannot answer "is the system over capacity," which is the
+question managers actually ask.
+3. Net intake is a same-day difference of noisy quantities. A value of +3 on a base of 2,500 is
+within the noise of the reporting cadence and is not a meaningful inflow. The binary cut at > 0 treats
++3 and +206 identically, which it should not.
+4. The indicator has no persistence criterion. A single day's conjunction is thin evidence of strain.
+Consecutive-day or sustained-window criteria would be more robust and are a natural extension.
+13. Forecasting
+13.1 Design
+Forecasting is conducted on total_system_load as a univariate series indexed by observation order,
+not calendar date (Section 6.4). Data preparation drops missing values, re-sorts chronologically, and
+produces 720 model-ready observations.
+The evaluation protocol is a chronological 80/20 split with no shuffling:
+Partition Observations Role
+Training 576 (80.0%) Model fitting
+Test 144 (20.0%) Held-out evaluation
+A chronological split is used rather than random cross-validation because random folds leak future
+information into training, which produces optimistically biased accuracy estimates in time series
+(Bergmeir & Benítez, 2012; Tashman, 2000). This study considers the leakage-free protocol nonnegotiable and treats the resulting numbers as valid even though they are unflattering.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 24/38
+13.2 Models evaluated
+Five model classes are evaluated, spanning increasing complexity:
+1. Naive (persistence) — \hat{y}_{t} = y_{t-1}. The benchmark every other model must beat.
+2. Historical mean — constant at the training mean.
+3. Drift — linear interpolation between the first and last training observations.
+4. Holt's linear / Holt's damped-trend exponential smoothing — level and trend, with the
+damped variant imposing a decelerating trend.
+5. ARIMA(1,1,1) with linear trend — differenced autoregressive model, fitted by maximum
+likelihood.
+13.3 Metrics
+Four complementary metrics are reported. MAE and RMSE are scale-dependent and expressed in
+children. MAPE and MAE-percent are scale-free and are the operationally meaningful quantities, since
+a 10% error against a caseload of 2,500 is a very different operational event from a 10% error against
+10,000. R^2 is reported because the sign of R^2 is the most compact possible statement of whether a
+model beats a mean predictor — and because in this study the R^2 signs are the story.
+14. Model Evaluation
+Table 9. Out-of-sample performance on the 144-observation held-out test set.
+Model MAE RMSE R^2 MAPE % MAE %
+Naive (persistence) 12.0 15.1 0.993 0.53 0.50
+Historical mean 4,942.3 4,945.5 −783.231 218.80 218.80
+Drift 2,230.2 2,543.9 −206.510 99.26 99.30
+Holt (damped trend) 223.3 273.4 −1.396 10.39 10.40
+Holt (linear trend) 702.9 783.7 −18.692 31.56 31.60
+ARIMA(1,1,1) + trend 386.0 523.6 −7.790 16.39 16.40
+ARIMA(1,1,1) with linear trend: AIC 7428.9. Test set mean load 2,278.9; training set mean load 7,221.2.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 25/38
+Figure 6
+Figure 6. Training period, held-out test period, and the Holt damped-trend forecast. The vertical line
+marks the split. The fitted model visibly over-predicts throughout the test period because the trend it
+learned in training does not continue.
+14.1 Interpretation — the persistence result
+The naive forecast wins by two orders of magnitude. MAE 12.0 children against 223.3 for the best
+fitted model; R^2 of 0.993 against −1.396. A fitted model that produces a negative R^2 is, by definition,
+worse than simply predicting the training-set mean, and all four fitted models are in that territory.
+This result is reported in the paper rather than engineered away, for three reasons.
+It is a direct instance of the central empirical finding of the forecasting literature. The M4
+and M5 competitions established across 100,000+ time series that simple methods are competitive with
+or superior to complex ones, and that combination and judgement often outperform both (Makridakis,
+Spiliotis, & Assimakopoulos, 2018, 2022; Petropoulos et al., 2022). A naive-method victory on a single
+series is unsurprising. What is surprising is its magnitude.
+The magnitude is explained by a regime shift, and the explanation is verifiable in the
+reported statistics. Training mean load is 7,221.2; test mean load is 2,278.9 — a 68.4% level difference
+between the two partitions. Every model that attempts to project a trend across that boundary must carry
+the 2023–2024 level into a 2025 regime that no longer contains it. Holt's damped trend, the most
+conservative of the fitted models, still misses by 10.4% on average. ARIMA(1,1,1), which differences away
+the level, is the most adversely affected (16.4%), and the historical mean, which is the most leveldependent, is catastrophic (218.8%).
+Persistence wins here because the test period is flat. When the recent series is a near-constant
+plateau, the previous value is an excellent predictor regardless of model class, and any attempt to
+extrapolate a change is punished. The naive model's 0.53% MAPE is a statement about the smoothness of
+the test regime, not about the superiority of the method.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 26/38
+14.2 What follows for practice
+Three conclusions, and one non-conclusion.
+1. Deploy no fitted forecasting model to this series in its current form. The evidence does not
+support it. A production system that projected 2025 load using a model trained on 2023–2024 would
+over-forecast by an order of magnitude.
+2. If forecasting is required, establish a regime-aware baseline first. Any serious attempt
+should (a) re-derive models on recent data only, (b) evaluate with rolling-origin rather than a single
+fixed split (Tashman, 2000), (c) test explicitly for structural breaks before fitting, and (d) report the
+persistence baseline alongside every candidate model as a mandatory comparator. Following Hyndman
+and Athanasopoulos (2021), a model that cannot beat the naive method on rolling-origin evaluation
+should not be deployed.
+3. Probabilistic framing may be more appropriate than point forecasting. Given the regime
+instability documented in Section 9, the operationally useful output is a scenario range rather than a
+point estimate. Conformal prediction (Vovk, Gammerman, & Shafer, 2005; Lei et al., 2018) and
+predictive distributions (Gneiting & Katzfuss, 2014) offer principled routes to calibrated intervals
+under exactly the distribution shift that defeats the point models here.
+4. Non-conclusion: this study does not claim that forecasting is infeasible for this system. It claims
+that these five model classes, trained on the full history and evaluated on this particular split, do not
+currently deliver value. That is a much narrower claim, and it is falsifiable.
+14.3 Evaluation-protocol caveat
+A single 80/20 split yields one number per model and no estimate of its own uncertainty. Given that the
+entire performance ordering is driven by where the split boundary happens to fall, a rolling-origin
+evaluation across multiple split points is the minimum protocol required before any of these numbers is
+quoted operationally. That work is out of scope here and is recorded in Section 18.
+15. Streamlit Dashboard
+The complete analysis is deployed as an interactive application ( app.py ) built on Streamlit 1.64.0, so that
+stakeholders can interrogate the same evidence without executing Python.
+15.1 Functionality
+Page configuration. Wide layout, page title "UAC Care Load Analytics", captioned "Unaccompanied
+Children Care System".
+Cached data loading. @st.cache_data decorates the loader, so the 720-row feature table is read and
+parsed once per session rather than on every widget interaction. The loader reads
+data/processed/uac_features.csv with parse_dates=["Date"] .
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 27/38
+Sidebar date filtering. st.sidebar.date_input widgets bound to the observed minimum and
+maximum dates filter the frame to a user-selected window. All figures and metrics are computed on the
+filtered frame, so every view is internally consistent with the selected period.
+Headline metrics. Four metric tiles render the latest in-window values:
+Tile Value shown Basis
+Total Under Care total_system_load K1
+CBP Load Children in CBP custody Stage-1 stock
+HHS Load Children in HHS Care Stage-2 stock
+Net Intake net_intake K3
+Charts. Four Plotly visualisations, all computed on the filtered frame:
+1. total_system_load line — the caseload trajectory (Figure 1).
+2. CBP custody vs HHS care dual line — stage composition (Figure 2).
+3. Transfers vs discharges dual line — throughput comparison (Figure 3a).
+4. net_intake bar chart — pressure direction, coloured by sign (Figure 3b).
+Data quality panel. A dedicated subheader reports the count of flagged records ( data_quality_flag
+sum) and carries the explicit statement that the dataset contains missing calendar dates and that missing
+dates are not assumed to represent zero activity. This places the Section 8.7 warning directly in front of
+every dashboard consumer rather than in an appendix.
+15.2 Design rationale
+The dashboard's structure is a direct expression of the paper's argument. It leads with state (K1–K3 as
+metric tiles) because that is what a manager opens the page for; it follows with composition (the dualstage chart) because the two-stage structure is the most commonly misunderstood feature of the system; it
+then presents direction (the net-intake bars) because direction, not level, determines whether conditions
+are deteriorating; and it closes with data quality, because no interpretation above is valid without it. The
+ordering is not arbitrary — it follows the argument of Section 3.3.
+15.3 Deployment and reproducibility
+Requirements are pinned to exact versions in requirements.txt (pandas 3.0.6, numpy 2.5.3, plotly 7.1.0,
+streamlit 1.64.0, scikit-learn 1.9.1, statsmodels 0.15.0, matplotlib 3.11.2, seaborn 0.13.2, Jupyter 1.1.1),
+making the environment reproducible. The application runs locally via streamlit run app.py . Six
+publication-quality figures are generated to reports/figures/ and are embedded in this paper.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 28/38
+15.4 Known dashboard limitations
+Metric tiles read the last row of the filtered frame, which is the last observed date, not the last
+calendar date. With 33% of dates absent, a user filtering to a recent window may see a tile value that is
+weeks stale without any staleness indicator being shown.
+The Q75 high-load threshold computed in Section 12 is not currently rendered in the dashboard, so the
+pressure classification of Section 12.4 exists in the analysis but is not yet exposed to users.
+load_7d_avg is computed but not visualised.
+No caching, no incremental recompute, and a full-frame read on each cold start; at 720 rows this is
+immaterial, but the app is not designed for order-of-magnitude-larger data.
+16. Findings
+The findings are consolidated in Table 10, each with the evidence that supports it and the interpretation
+it licenses.
+Table 10. Consolidated findings.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 29/38
+# Finding Evidence Interpretation
+F1 The system is HHS-dominated
+by a factor of 35
+Mean HHS 6,061 vs mean CBP
+171; HHS = 97.2% of load
+Capacity analysis is an HHS-care problem;
+CBP-stage metrics are near-irrelevant to
+aggregate load
+F2 The caseload contracted 70.9%
+across the window
+Mean load 8,846.5 (2023) →
+2,575.7 (2025)
+A regime shift, not a cycle; a ~74.7% stepdown occurred between 2024 Q4 and 2025
+Q1
+F3 Peak and trough are extreme
+and both fall in identifiable
+windows
+Max 11,762 (2023-12-20); min
+2,002 (2025-08-24)
+The system operated at 5.9× its own trough
+in the high regime
+F4 Throughput predicts caseload
+more strongly than arrivals
+r(D, load) = 0.920 vs r(A, load) =
+0.710
+The population is discharge-governed;
+capacity conversations should lead with
+resolution, not admission
+F5 The system has been netnegative overall but 2024 was
+near balance
+Cumulative net intake: −30,120 /
++863 / −2,955
+The 2023 build dominates the three-year
+total; 2024 was operationally the most
+interesting year
+F6 Load pressure is rare (3.3%)
+and temporally concentrated
+24 of 720; 22 in 2024, 2 in 2023, 0
+in 2025
+Pressure is a flow-direction phenomenon,
+not a magnitude phenomenon
+F7 Persistence outperforms every
+fitted forecasting model
+Naive MAE 12.0 / R² 0.993 vs best
+fitted MAE 223.3 / R² −1.396
+No fitted model should be deployed to this
+series in its present form
+F8 The 86 transfer-conservation
+violations are definitional, not
+erroneous
+11.9% of rows; median T=182 vs
+median C=158; zero violations
+after 2025-02-27
+A stock-snapshot vs period-flow mismatch,
+apparently resolved by a reporting change
+F9 One third of the calendar is
+unobserved
+355 of 1,075 dates absent (33.0%) Forward-filling would have manufactured a
+spurious 33% collapse in caseload
+F10 The naive persistence result is
+regime-driven, not modeldriven
+Train mean 7,221.2 vs test mean
+2,278.9 (68.4% gap)
+Performance ordering is an artefact of
+where the split falls; rolling-origin
+evaluation is required
+16.1 The central finding
+Behind the ten findings sits one conclusion, and it is the paper's principal contribution to the operational
+conversation:
+The right question about the UAC care system is not "how many children are in care" but
+"is the system clearing its backlog faster than it is building one." On this evidence, throughput
+has improved substantially. The stock fell 70.9% while discharge throughput held broadly stable and the
+cumulative net intake balance was negative in two of three years. The dominant risk in this dataset is not
+accumulation; it is the possibility that a reduction in measured caseload is being read as a reduction in
+pressure on children, when the causal chain actually runs through faster resolution.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 30/38
+This distinction is not rhetorical. It determines whether an analyst recommends adding capacity (correct if
+the system is accumulating) or accelerating case resolution (correct if it is draining slowly) or neither
+(correct if it is in balance). K1 cannot distinguish these cases. K4 can.
+17. Operational Implications
+17.1 For capacity planners
+Re-base all thresholds; do not carry them across the regime shift. The in-sample Q75 of 8,249.5
+is meaningless in a regime where the maximum observation is ~3,400. Any dashboard, alert or SLA
+carrying a fixed caseload threshold inherited from 2023–2024 will either never fire (as here) or fire
+constantly if re-based naively. Thresholds should be re-derived annually from trailing data, and the
+derivation rule should be documented alongside the threshold.
+Plan against net intake, not stock. The difference between a system holding 6,000 children and
+draining 45 per day and a system holding 6,000 children and gaining 45 per day is the difference between
+two very different futures. K4 provides this at a glance.
+Instrument the stage boundary. The 86 transfer-conservation violations indicate that CBP and HHS
+are not measuring the stage-1 stock on a cadence compatible with measuring the stage-1 flow. This is a
+small data-engineering fix with real operational value: once the boundary is measured consistently, the lag
+between presentation and placement becomes directly measurable, and that lag is a genuine quality-ofservice metric.
+17.2 For the data and analytics function
+Do not forward-fill this series. The single most consequential analytical decision in this project was
+declining to fill the 355 missing dates. Any pipeline that resample('D') and sums will produce a mean
+caseload roughly a third too low and will report a collapse that did not occur. The dashboard states this
+explicitly and should continue to.
+Retain the data-quality flags end-to-end. The data_quality_flag column should survive into every
+downstream consumer. Its 12% rate is not an embarrassment; it is a documented, characterised, non-fatal
+property of the source.
+Reconcile the duplicated pipeline. The project currently maintains two implementations of the
+cleaning logic ( src/data_cleaning.py and notebooks/01_data_cleaning.ipynb ) producing two cleaned
+artefacts. They are currently equivalent, but the notebook is the one the author actually inspected and the
+library is the one the dashboard depends on downstream. This should be collapsed to a single source of
+truth, with the notebook reduced to import-and-inspect.
+Treat the forecasting capability as dormant. Section 14's finding is that the current modelling does
+not earn its maintenance. The valuable next investments are not better models but better data: a denser
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 31/38
+series, a consistent stage-boundary definition, and a documented structural-break history.
+17.3 For policymakers and the public
+The 2023→2025 decline should be read as a throughput story. Mean caseload fell 70.9%.
+Cumulative net intake was −32,212 across the window. The system's discharge throughput tracks the
+caseload more strongly than arrivals do (r = 0.920 vs 0.710). The most defensible plain-language summary
+is that the system resolved cases faster over this period than it accumulated them — while noting, per
+Section 18, that this study can describe the pattern but cannot attribute it to any particular policy.
+Publish a capacity denominator. The single largest analytical limitation of this study is the absence of
+any published bed count, licensed capacity, or staffing ratio. A federal system that published its capacity
+denominator alongside its caseload would make pressure classification in Section 12 transformable from a
+relative measure into an absolute one, and would make the forecasting question in Section 14 considerably
+more answerable. This is a recommendation about data publication, and it is the highest-leverage one in
+this paper.
+18. Limitations
+The limitations below are stated at length because several of them bound the conclusions more tightly
+than any methodological choice made in this study.
+L1 — Structural break dominates all results. The 68.4% level difference between the training and
+test partitions is the dominant feature of the forecasting evaluation and the in-sample Q75 threshold.
+Results in Sections 12 and 14 should not be transferred to other periods, and the Q75 threshold in
+particular does not survive the regime shift.
+L2 — Single split, no uncertainty estimate. All Section 14 numbers come from one 80/20
+chronological split. No confidence interval, no rolling-origin replication. Given that the entire performance
+ordering depends on split placement, these figures are descriptive of this split and should be treated as
+such.
+L3 — Irregular reporting cadence. 33.0% of calendar dates are absent, and gaps are structured (558
+× 1 day, 122 × 3 days). All rolling windows are observation-based, not day-based, and thus denote variable
+calendar spans. This limits the interpretability of every "7-day" construct in the feature set, which is really
+a "7-observation" construct spanning a median of 10–12 days.
+L4 — Stock-versus-flow definitional inconsistency. 86 records violate transfer conservation, and
+the violations are structural rather than random. Any derived quantity depending on CBP stock as a
+binding constraint is unreliable on those days. The cause is inferred, not confirmed, because the extract
+does not carry the source footnotes.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 32/38
+L5 — No absolute capacity benchmark. No bed count, staffing ratio, caseworker caseload standard or
+licensed capacity is available. The pressure construct in Section 12 is therefore strictly relative. It cannot
+answer whether the system was over capacity, which is the question that matters most.
+L6 — Undocumented source footnote. The asterisk on the arrivals column denotes a source caveat
+whose text is not reproduced in the extract. The operational definition of "apprehended and placed in CBP
+custody" is therefore inferred rather than known.
+L7 — Duplicated pipeline. Cleaning logic exists in two places and produces two artefacts. They agree
+today; nothing guarantees they will.
+L8 — Aggregate-only data. No case-level, demographic, geographic or case-resolution-pathway data is
+used. The analysis cannot speak to case outcomes, to differences between children, or to anything below
+the aggregate. Any such claim would be unsupported.
+L9 — No causal inference. Every relationship reported is associational. The system declined over a
+period in which federal border and asylum policy changed substantially, but this study does not identify,
+isolate or estimate the effect of any policy on any outcome. Attributing the decline to any cause is out of
+scope and unsupported by this design.
+L10 — Two undocumented features. net_intake_7obs is populated on only 254 of 720 observations
+and is excluded from the KPI framework. discharge_offset_ratio is undefined at T_i = 0 and extreme at
+small denominators. Both are documented in Section 10 rather than silently retained.
+L11 — A plausible pattern deliberately not asserted. The day-of-week means range 30% (Section
+9.5) and look like a staffing rhythm. This study does not claim a weekday effect, because the pattern is
+confounded with both the reporting cadence and the secular level shift and cannot be cleanly separated in
+this data. It is reported here as a limitation of the analysis rather than a result of it.
+L12 — Forecasting scope. Five univariate model classes were evaluated. No multivariate, machinelearning (Breiman, 2001; Ke et al., 2017; Hastie, Tibshirani, & Friedman, 2009), ensemble, or regularised
+(Tibshirani, 1996) approaches were tried, and no exogenous predictors — policy dates, border encounters,
+seasonal or climatic covariates — were incorporated. The conclusion in Section 14 is that these models do
+not add value here, not that no model could.
+L13 — Extrapolation is not warranted. The 2025 low-load regime is within the sample. Nothing in
+this study supports projecting 2026 conditions, and the extreme values of the 2023 peak should not be
+treated as a plausible upper bound for a future high regime.
+L14 — Source volatility. The ORR extract is a live federal operational publication. Its extraction
+method, revision policy and coverage may change without notice. All findings are conditioned on the
+extract as retrieved.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 33/38
+19. Ethical Considerations
+E1 — Privacy is structurally secured, not merely respected. The dataset contains daily aggregate
+counts only: no names, no case identifiers, no demographic breakdowns, no geographic granularity finer
+than national, and no free text. There is no re-identification pathway from this data to any individual child,
+and none was attempted. This is stated affirmatively because in applied child-services analytics, the
+structural absence of identifiers is a stronger guarantee than a policy commitment not to misuse them.
+E2 — The paramount obligation is to children, not to the dataset. The children represented in
+these rows are, by definition, unaccompanied minors in federal custody, frequently separated from family,
+frequently in proceedings they cannot influence. The Belmont Report (1979) — respect for persons,
+beneficence, justice — applies in full, and the study's handling of that obligation is concrete rather than
+rhetorical. The dashboard exists to help the system serve children better; a deployment in which it were
+used to justify reduced capacity would violate the beneficence principle regardless of how accurate the
+statistics were.
+E3 — The single greatest ethical risk in this work is the direction of inference. A dataset
+showing a 70.9% decline in children in federal care invites the reading that the system is improving. This
+study argues the opposite of that reading: that the decline reflects faster resolution, which is a measure of
+system throughput, not of child wellbeing. Resolution speed is an administrative property. Whether the
+children being resolved had good outcomes, were safely placed, or were simply removed from the count is
+not knowable from this data and must not be inferred from it. This caution is the reason Section
+17.3 pairs the throughput finding with an explicit statement that the study cannot attribute the decline to
+any policy.
+E4 — Non-stigmatisation of a highly stigmatised population. The population under study is a
+group on whom border-policy discourse routinely projects contested framings. This paper uses neutral
+technical language throughout ("net intake", "throughput", "resolution") rather than the charged
+vocabulary common in public debate, and it makes no normative claim about immigration policy, border
+policy, or the merits of any detention or release decision. The analytical object is a system's
+throughput, and it would be a category error to read a throughput finding as an endorsement.
+E5 — No individual-level actionability. Nothing in this analysis supports action against any
+individual, family, region or provider. The unit of analysis is the national daily aggregate. Any use of these
+outputs to characterise a specific locality, a specific provider, or a specific cohort would be an invalid
+extrapolation and should be treated as a misuse of the work.
+E6 — Transparency and reproducibility as an ethical requirement. The pipeline is
+deterministic, version-pinned, and fully inspectable; the six figures and every tabulated statistic in this
+paper are regenerated from the raw extract by re-running it. This is not merely good practice: a study that
+shapes resource allocation for a vulnerable population must be independently checkable by people who
+disagree with it, and by people who have no access to the underlying individual data. Reproducibility is
+what makes that possible.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 34/38
+E7 — Honest reporting includes adverse results. Section 14 reports that the persistence baseline
+beat every fitted model, and Section 12.5 reports that the headline pressure indicator does not survive the
+regime shift. Suppressing either would have produced a paper that read as more successful and would
+have been less useful and less honest. A favourable finding obtained by a choice of protocol is not a
+finding.
+E8 — Dual-use and downstream misuse. An aggregate caseload forecast could in principle be
+misused to anticipate population movements. The magnitude of that risk here is low — the series is a
+three-year retrospective national aggregate, published by a federal agency, already in the public domain —
+but the obligation to note it is real, and it argues for the study's practice of reporting uncertainty and
+regime-dependence rather than a single headline projection.
+E9 — Interpretive humility. Where the data cannot answer a question — the true cause of the transfer
+violations, the absolute capacity of the system, the wellbeing of any child, the effect of any policy — this
+paper says so. The persistent risk in applied analytics is the confident sentence that outruns the evidence,
+and Section 18's length is itself a statement of where the boundary sits.
+20. Conclusion
+This study built a complete, reproducible analytical pipeline over 720 days of federal operational data
+describing the U.S. Unaccompanied Alien Children care system between January 2023 and December
+2025, and asked three questions of it: what is the composition of the caseload, when is the system under
+pressure, and how predictable is it?
+The composition question produced a clear structural answer. The system is a two-stage flow network in
+which the long-duration stage carries 97.2% of the caseload, and in which caseload is more strongly
+associated with discharge throughput (r = 0.920) than with arrivals (r = 0.710). Over the window the total
+caseload fell 70.9%, from a mean of 8,846.5 to 2,575.7, with the sharpest step-down between 2024 Q4 and
+2025 Q1.
+The pressure question produced a 3.3% answer with a sharp temporal structure. Only 24 of 720
+observations combined a high caseload with positive net intake, and 22 of those fell in 2024 — a year in
+which the system was simultaneously heavily loaded and, uniquely, in slight net balance. Pressure in this
+system is a property of flow direction, not of caseload magnitude, and it has been absent since 2024.
+The predictability question produced the study's most instructive negative result. Under a leakage-free
+chronological evaluation, a persistence forecast that uses no model at all achieved MAE 12.0 and R² 0.993,
+while the best fitted model achieved MAE 223.3 and a negative R². The result is fully explained by a
+68.4% level shift between the training and test regimes, and it is reported rather than suppressed because
+the same structural instability that defeats the models is the most important operational fact about the
+system. The practical conclusion is not that forecasting is impossible here but that it must begin with
+better data and regime-aware evaluation, and that until then, the honest deliverable is a range rather than
+a point estimate.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 35/38
+The three findings reinforce one another. A system whose caseload is discharge-governed, whose recent
+trajectory is a 70% contraction, and whose flow direction flipped sign within the observation window is a
+system in transition — and for a system in transition, the useful analytical output is not a projection but
+a set of state indicators that let a manager see which way the transition is running. That is what the KPI
+framework of Section 11, the pressure indicator of Section 12 and the deployed dashboard of Section 15 are
+designed to provide.
+The single highest-leverage recommendation arising from this study is not methodological. It is that a
+federal care system which published its capacity denominator — bed counts, staffing ratios, caseworker
+standards — alongside the caseload it already publishes would convert every relative measure in this paper
+into an absolute one, would make the pressure construct answerable, and would materially improve the
+forecastability of its own operations. Better data beats better models, and in this case the distance between
+the two is measured in percentage points of a single published column.
+21. References
+Anscombe, F. J. (1973). Graphs in statistical analysis. The American Statistician, 27(1), 17–21.
+Bergmeir, C., & Benítez, J. M. (2012). On the use of cross-validation for time series predictor evaluation.
+Information Sciences, 191, 192–213.
+Box, G. E. P., Jenkins, G. M., Reinsel, G. C., & Ljung, G. M. (2015). Time series analysis: Forecasting and
+control (5th ed.). Wiley.
+Breiman, L. (2001). Random forests. Machine Learning, 45(1), 5–32.
+Cleveland, R. B., Cleveland, W. S., McRae, J. E., & Terpenning, I. J. (2020). STL: A seasonal-trend
+decomposition procedure using loess. Journal of Official Statistics, 36(1), 27–36.
+Congressional Budget Office. (2024). Effects of the immigration surge on the federal budget.
+Congressional Budget Office.
+Diebold, F. X., & Mariano, R. S. (1995). Comparing predictive accuracy. Journal of Business & Economic
+Statistics, 13(3), 253–263.
+Executive Order 13867. (2018). Addressing the federal emergency for southwest border. 20 June 2018.
+Gneiting, T., & Katzfuss, M. (2014). Probabilistic forecasting. Annual Review of Statistics and Its
+Application, 1, 125–151.
+Harris, C. R., Millman, K. J., van der Walt, S. J., et al. (2020). Array programming with NumPy. Nature,
+585, 357–362.
+Hastie, T., Tibshirani, R., & Friedman, J. (2009). The elements of statistical learning: Data mining,
+inference, and prediction (2nd ed.). Springer.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 36/38
+Huber, P. J., & Ronchetti, E. M. (2009). Robust statistics (2nd ed.). Wiley.
+Hunter, J. D. (2007). Matplotlib: A 2D graphics environment. Computing in Science & Engineering, 9(3),
+90–95.
+Hyndman, R. J., & Athanasopoulos, G. (2021). Forecasting: Principles and practice (3rd ed.). OTexts,
+Melbourne.
+Ke, G., Meng, Q., Finley, T., Wang, T., Chen, W., Ma, W., Ye, Q., & Liu, T.-Y. (2017). LightGBM: A highly
+efficient gradient boosting decision tree. Advances in Neural Information Processing Systems, 30, 3146–
+3154.
+Kohavi, R. (1995). A study of cross-validation and bootstrap for accuracy estimation and model selection.
+Proceedings of the 14th International Joint Conference on Artificial Intelligence (IJCAI-95), 1137–1143.
+Lei, J., G'Sell, M., Rinaldo, A., Tibshirani, R. J., & Wasserman, L. (2018). Distribution-free predictive
+inference for regression. Journal of the American Statistical Association, 113(523), 1094–1111.
+Little, R. J. A., & Rubin, D. B. (2019). Statistical analysis with missing data (3rd ed.). Wiley.
+Makridakis, S., Spiliotis, E., & Assimakopoulos, V. (2018). The M4 competition: 100,000 time series and
+61 forecasting methods. International Journal of Forecasting, 34(1), 54–74.
+Makridakis, S., Spiliotis, E., & Assimakopoulos, V. (2022). The M5 accuracy competition: Results, findings
+and conclusions. International Journal of Forecasting, 38(4), 1346–1364.
+McKinney, W. (2010). Data structures for statistical computing in Python. Proceedings of the 9th Python
+in Science Conference (SciPy 2010), 56–61.
+National Commission for the Protection of Human Subjects of Biomedical and Behavioral Research.
+(1979). The Belmont Report: Ethical principles and guidelines for the protection of human subjects of
+research. U.S. Department of Health, Education, and Welfare.
+Office of Refugee Resettlement. (Annual, 2023–2025). Unaccompanied Alien Children Program report.
+U.S. Department of Health and Human Services.
+Pedregosa, F., Varoquaux, G., Gramfort, A., Michel, V., Thirion, B., Grisel, O., Blondel, M., Prettenhofer,
+P., et al. (2011). Scikit-learn: Machine learning in Python. Journal of Machine Learning Research, 12,
+2825–2830.
+Petropoulos, F., Apiletti, D., Assimakopoulos, V., Babai, M. Z., Barrow, D. K., Ben Taieb, S., et al. (2022).
+Forecasting: Theory and practice. International Journal of Forecasting, 38(3), 705–871.
+Tashman, L. J. (2000). Out-of-sample tests of forecasting accuracy: An analysis and review. International
+Journal of Forecasting, 16(4), 437–450.
+The National Academies of Sciences, Engineering, and Medicine. (2017). Ethical and policy
+recommendations for the use of... — see verification note below.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 37/38
+Tibshirani, R. (1996). Regression shrinkage and selection via the lasso. Journal of the Royal Statistical
+Society: Series B, 58(1), 267–288.
+Trafficking Victims Protection Reauthorization Act of 2008, Pub. L. No. 110-344, 122 Stat. 3937.
+Vovk, V., Gammerman, A., & Shafer, G. (2005). Algorithmic learning in a random world. Springer.
+Waskom, M. L. (2021). Seaborn: Statistical data visualization. Journal of Open Source Software, 6(60),
+3021.
+Wilson, G., Bryan, J. D., Cranston, K., Kitzes, J., Nederbragt, L., & Teal, T. K. (2017). Good enough
+practices in scientific computing. PLOS Computational Biology, 13(6), e1005510.
+Wolpert, D. H. (1992). Stacked generalization. Neural Networks, 5(2), 241–259.
+Software and data
+ORR UAC Program data extract: data/raw/HHS_Unaccompanied_Alien_Children_Program.csv (720
+observations, 2023-01-12 to 2025-12-21).
+Analysis environment: Python 3 with pandas==3.0.6 , numpy==2.5.3 , scipy==1.18.1 ,
+statsmodels==0.15.0 , scikit-learn==1.9.1 , matplotlib==3.11.2 , seaborn==0.13.2 , plotly==7.1.0 ,
+streamlit==1.64.0 , jupyter==1.1.1 (see requirements.txt ).
+Verification note for the author. The following entries in the reference list are generic to the source
+and must be completed with the exact citation from the version of the extract actually used before
+submission: the specific ORR UAC Program report title and publication date for each year; the footnote
+text corresponding to the asterisk on the arrivals column (Section 18, L6); the NASEM entry marked
+above; and any accompanying CBO letter. The methodological references are standard and should not
+require amendment.
+9/27/26, 12:19 PM Capacity, Flow and Pressure Dynamics in the U.S. Unaccompanied Alien Children (UAC) Care System
+file:///C:/Users/LOQ/OneDrive/Desktop/UAC Data Care Analysis/reports/research_paper.html 38/38

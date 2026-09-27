@@ -1,0 +1,37 @@
+Executive Summary
+Unaccompanied Alien Children (UAC) Program — Care System Load Analysis, January 2023 – December 2025
+
+Purpose
+This project analyses how the UAC care system — CBP custody plus HHS care — absorbed children over three years, and what the record shows about where pressure built and where it eased. A raw HHS reporting file is turned into a cleaned, validated panel, five load and flow metrics are derived from it, periods of compound pressure are characterised, and the limits of the evidence are stated explicitly. The audience is programme and operations leadership who need a defensible read on system load without access to facility-level records.
+
+Data
+The analysis rests on 720 observed records covering 12 January 2023 through 21 December 2025, drawn from the HHS Unaccompanied Alien Children Program public reporting file. The six published fields — children apprehended, in CBP custody, transferred out of CBP custody, in HHS care, and discharged from HHS care — are joined with three validation flags and eight derived metrics, giving 17 columns per record.
+
+Two features of the calendar matter throughout. The window spans 1,075 calendar days, of which 355 (33.0%) have no observation; missing days are treated as unreported, never as zero activity. And 86 records (11.9%) fail an internal consistency check, flagged but retained. The result is an irregular series of roughly 20 observations per month, not a complete daily panel.
+
+Metrics
+Metric	Definition	Observed range
+Total System Load	Children in CBP custody + children in HHS care	2,002 – 11,762 (mean 6,233)
+Net Intake	Transfers out of CBP custody − discharges from HHS care	−465 to +206; negative on 66.9% of observations
+Load Volatility	Rolling 7-observation standard deviation of the change in total load	Mean 104 children; peak 373
+Discharge Offset Ratio	HHS discharges ÷ CBP transfers on the same record	Median 1.28; range 0.00 – 43.3
+Data Quality Flags	Transfer exceeds custody, or discharge exceeds care	86 of 720 records (11.9%)
+Findings
+1. Load peaked in December 2023 and has fallen by roughly 71% since. Total system load reached its maximum of 11,762 children on 20 December 2023. Annual mean load was 8,847 in 2023, 7,320 in 2024, and 2,576 in 2025. HHS care accounts for essentially the entire change (mean 8,646 → 7,043 → 2,543); CBP custody never averaged more than 277 children in any year. The break is a step rather than a trend: HHS care fell from a monthly mean of 4,991 in January 2025 to 2,782 in February and 2,164 in March, then held between roughly 2,000 and 2,500 for the remainder of the year.
+
+2. Net intake is negative across most of the record. Cumulative net intake over the full window is −32,212 children — the system drained rather than accumulated. 2023 alone contributed −30,120, with 94.8% of that year's observations showing negative intake; 2024 was close to break-even at +863; 2025 returned to a modest drain of −2,955. Only 33.1% of all observations show positive intake, and the largest single-observation surplus is +206 on 12 February 2024.
+
+3. Compound pressure is rare and confined to early 2024. Against a high-load threshold of 8,250 children (the 75th percentile of total system load), 180 observations qualify as high-load and 238 show positive intake, but only 24 records (3.3%) meet both conditions. Two fall in 2023 and 22 in 2024, all within a single window running from 21 February 2023 to 19 March 2024. No pressure event of this kind is recorded after March 2024.
+
+4. Discharge behaviour reversed and then reversed back. The discharge offset ratio had a median of 1.73 in 2023, meaning HHS care was discharging children faster than CBP could transfer them in — the pipeline downstream was the constraint. In 2024 the ratio inverted to 0.93, with transfers outpacing discharges, before returning to 1.38 in 2025. Mean values across all years are inflated by outliers as high as 43.3, so the median is the more reliable reading.
+
+5. Volatility has fallen along with the level. The standard deviation of the observation-to-observation change in total load declined from 185 in 2023 to 142 in 2024 and 67 in 2025. Rolling 7-observation volatility averaged 104 children and peaked at 373. By the end of the record the system is both substantially smaller and measurably steadier than at any earlier point.
+
+Limitations
+Irregular observation calendar. 355 of 1,075 days in the window (33.0%) carry no record. Rolling windows and difference metrics are therefore indexed by observation, not by calendar day, so they describe change between consecutive reported snapshots rather than change per day.
+86 transfer validation flags. On 11.9% of records, children transferred out of CBP custody exceed children in CBP custody on the same day, which is internally inconsistent — most plausibly because the fields are published on different update cycles. No discharge violations were found. All 86 records are retained and flagged; any metric depending on transfers or net intake inherits this uncertainty.
+No capacity denominator. The dataset contains no licensed bed counts, shelter capacity, or target occupancy, so load is expressed only in absolute numbers of children. Utilisation percentages and any claim that the system was "over capacity" are not supportable from this evidence.
+No staffing data. Nothing in the record links load to staffing levels, caseloads, or cost, so the analysis cannot judge whether observed loads were operationally sustainable or adequately resourced.
+Aggregated counts only. Every field is a single daily national total. There is no per-facility, per-state, or per-case resolution, so variation hidden inside the aggregate is invisible and no local or sub-national conclusion can be drawn.
+The 2025 level shift is unverified. A 71% reduction is large enough that a change in programme scope, funding, or reporting practice cannot be excluded from this record alone. The finding is reported as an observed break in the series, not as an explained event.
+Forecasting is constrained by the observation pattern. With 720 irregularly spaced observations, a third of the calendar missing, and a structural break between the 2024 and 2025 regimes, any time-series model would fit one process across two distinct ones. Trend, volatility, and autocorrelation are not stable across the window, so prediction intervals would materially understate real uncertainty. Forecast output is illustrative and should not be used for operational planning.
