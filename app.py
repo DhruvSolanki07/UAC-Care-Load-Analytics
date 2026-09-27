@@ -40,6 +40,11 @@ filtered_df = df[
     (df["Date"].dt.date >= start_date) &
     (df["Date"].dt.date <= end_date)
 ]
+
+if filtered_df.empty:
+    st.warning("No data found for the selected date range. Please select a valid date range.")
+    st.stop()
+
 latest = filtered_df.iloc[-1]
 
 col1, col2, col3, col4 = st.columns(4)
